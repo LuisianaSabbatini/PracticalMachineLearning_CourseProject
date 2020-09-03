@@ -1,0 +1,155 @@
+---
+title: "CourseProject_PML"
+author: "Luisiana Sabbatini"
+date: "2/9/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## COURSE PROJECT
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+The following commands allow us to install the required packages, load libraries, and set the seed for reproduceability:
+
+```{r libraries}
+library(caret)
+library(randomForest)
+library(rpart) 
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+set.seed(888)
+```
+
+
+## Reading data 
+
+The following commands allow us to read the data directly from the internet page:
+```{r data}
+trainUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainFile <- "./data/pml-training.csv"
+testFile  <- "./data/pml-testing.csv"
+if (!file.exists("./data")) {
+  dir.create("./data")
+}
+if (!file.exists(trainFile)) {
+  download.file(trainUrl, destfile = trainFile, method = "curl")
+}
+if (!file.exists(testFile)) {
+  download.file(testUrl, destfile = testFile, method = "curl")
+}
+rm(trainUrl)
+rm(testUrl)
+
+trainRaw <- read.csv(trainFile)
+testRaw <- read.csv(testFile)
+dim(trainRaw)
+dim(testRaw)
+
+rm(trainFile)
+rm(testFile)
+
+```
+
+
+## Data Pre-processing
+
+We partition the dataset, then clean it by removing some variables that are not relevant for the accelerometric data, and by removing NAs:
+
+```{r clean}
+NZV <- nearZeroVar(trainRaw, saveMetrics = TRUE)
+head(NZV, 20)
+
+training01 <- trainRaw[, !NZV$nzv]
+testing01 <- testRaw[, !NZV$nzv]
+dim(training01)
+
+rm(trainRaw)
+rm(testRaw)
+rm(NZV)
+
+regex <- grepl("^X|timestamp|user_name", names(training01))
+training <- training01[, !regex]
+testing <- testing01[, !regex]
+rm(regex)
+rm(training01)
+rm(testing01)
+dim(training)
+dim(testing)
+
+cond <- (colSums(is.na(training)) == 0)
+training <- training[, cond]
+testing <- testing[, cond]
+rm(cond)
+
+# I now create the data partition useful for validating my models
+inTrain <- createDataPartition(training$classe, p = 0.70, list = FALSE)
+validation <- training[-inTrain, ]
+validation$classe<-factor(validation$classe)
+training <- training[inTrain, ]
+rm(inTrain)
+```
+
+## Using ML for Prediction
+
+# Decision Tree
+
+First of all, let's build a decision tree based on training data (and then visualize it):
+
+```{r DT}
+
+modelTree <- rpart(classe ~ ., data = training, method = "class")
+rpart.plot(modelTree, main="Classification Tree", extra=102, under=TRUE, faclen=0)
+```
+
+Now I use the developed model for predicting, and present the results in a confusion matrix:
+
+```{r DTpred}
+predictTree <- predict(modelTree, validation, type = "class")
+confusionMatrix(validation$classe, predictTree)
+
+accuracy <- postResample(predictTree, validation$classe)
+ose <- 1 - as.numeric(confusionMatrix(validation$classe, predictTree)$overall[1])
+rm(predictTree)
+rm(modelTree)
+```
+
+# Random Forest
+
+Now, let's build a decision tree based on training data:
+
+```{r RF}
+modelRF <- train(classe ~ ., data = training, method = "rf", trControl = trainControl(method = "cv", 5), ntree = 50)
+modelRF
+```
+
+Now I use the developed model for predicting, and present the results in a confusion matrix:
+
+```{r RFpred}
+predictRF <- predict(modelRF, validation)
+confusionMatrix(validation$classe, predictRF)
+
+accuracy <- postResample(predictRF, validation$classe)
+ose <- 1 - as.numeric(confusionMatrix(validation$classe, predictRF)$overall[1])
+rm(predictRF)
+```
+
+Comparing the two models, RF achieved better results.
+
+Finally, using the provided Test Set out-of-sample error.
+
+For Random Forests we use the following formula, which yielded a much better prediction in in-sample:
+
+
+Here the code to generate files with predictions to submit:
+
+```{r submission}
+rm(accuracy)
+rm(ose)
+predict(modelRF, testing[, -length(names(testing))])
+```
+
